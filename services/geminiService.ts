@@ -18,6 +18,13 @@ const getClient = () => {
     return aiInstance;
 };
 
+// Lista de modelos disponíveis
+export const AI_MODELS = [
+    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash (Padrão)' },
+    { value: 'imagen-3.0-generate-001', label: 'Imagen 3 (Alta Qualidade)' },
+    { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro (Requer Pagamento)' },
+];
+
 // Função de Diagnóstico para a UI
 export const checkApiKeyStatus = () => {
     const key = getApiKey();
@@ -37,13 +44,20 @@ export const testConnection = async () => {
         });
         return { success: true, message: `SUCESSO: ${response.text}` };
     } catch (e: any) {
-        return { success: false, message: `FALHA: ${e.message || e.toString()}` };
+        // Tenta extrair mensagem limpa
+        let msg = e.message || e.toString();
+        try {
+            if (msg.includes('{')) {
+                 const jsonPart = JSON.parse(msg.substring(msg.indexOf('{')));
+                 if(jsonPart.error) msg = `${jsonPart.error.code} - ${jsonPart.error.message}`;
+            }
+        } catch(err) {}
+        return { success: false, message: `FALHA: ${msg}` };
     }
 };
 
-// Using Flash models which generally provide faster inference.
-const MODEL_GEN = 'gemini-2.5-flash-image'; 
 const MODEL_ANALYZE = 'gemini-2.5-flash';
+const MODEL_DEFAULT_GEN = 'gemini-2.5-flash-image';
 
 // Helper to parse API errors
 const handleApiError = (error: any) => {
@@ -69,7 +83,7 @@ const handleApiError = (error: any) => {
 
     // Mensagens de erro com detalhes técnicos para o usuário debugar
     if (errorCode === 429 || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-        throw new Error(`⚠️ COTA EXCEDIDA (429). O Google bloqueou temporariamente esta chave. \nDetalhes técnicos: ${errorMsg}`);
+        throw new Error(`⚠️ COTA EXCEDIDA (429). O Google bloqueou temporariamente esta chave para este modelo.\nDetalhes técnicos: ${errorMsg}`);
     }
     
     if (errorMsg.includes('API Key not found') || errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
@@ -96,7 +110,8 @@ export const generateImage = async (
   styles: string[] = [],
   materials: string[] = [],
   backgroundType: 'neutral' | 'descriptive' = 'neutral',
-  backgroundDesc: string = ''
+  backgroundDesc: string = '',
+  model: string = MODEL_DEFAULT_GEN
 ): Promise<string[]> => {
   
   // Instancia o cliente aqui para evitar erro no load da página
@@ -122,65 +137,96 @@ export const generateImage = async (
   `.trim();
   
   try {
-    const config: any = {
-      imageConfig: {
-        aspectRatio: aspectRatio as any,
-      }
-    };
-
-    const parts: any[] = [{ text: fullPrompt }];
-
-    if (referenceImageBase64) {
-      const cleanBase64 = referenceImageBase64.split(',')[1] || referenceImageBase64;
-      parts.push({ text: `Referência visual/estilo (Influência: ${styleInfluence}):` });
-      parts.push({
-        inlineData: {
-          data: cleanBase64,
-          mimeType: 'image/png'
+    // === LÓGICA PARA IMAGEN (generateImages) ===
+    if (model.includes('imagen')) {
+        if (referenceImageBase64 || poseImageBase64) {
+            console.warn("Imagen model currently supports text-to-image only in this integration. Reference images ignored.");
         }
-      });
-    }
 
-    if (poseImageBase64) {
-        const cleanPose = poseImageBase64.split(',')[1] || poseImageBase64;
-        parts.push({ text: `Referência de pose estrutural/ControlNet (Influência: ${poseInfluence}):` });
-        parts.push({
-            inlineData: {
-                data: cleanPose,
-                mimeType: 'image/png'
+        const response = await ai.models.generateImages({
+            model: model,
+            prompt: fullPrompt,
+            config: {
+                numberOfImages: count,
+                aspectRatio: aspectRatio as any,
+                outputMimeType: 'image/jpeg'
             }
         });
-    }
 
-    // Function to execute a single generation request
-    const generateSingle = async () => {
-        try {
-            const response = await ai.models.generateContent({
-                model: MODEL_GEN,
-                contents: { parts },
-                config: config
-            });
-
-            const resultImages: string[] = [];
-            if (response.candidates?.[0]?.content?.parts) {
-                for (const part of response.candidates[0].content.parts) {
-                    if (part.inlineData && part.inlineData.data) {
-                        resultImages.push(`data:image/png;base64,${part.inlineData.data}`);
-                    }
+        const resultImages: string[] = [];
+        if (response.generatedImages) {
+            for (const img of response.generatedImages) {
+                if (img.image && img.image.imageBytes) {
+                    resultImages.push(`data:image/jpeg;base64,${img.image.imageBytes}`);
                 }
             }
-            return resultImages;
-        } catch (e) {
-            handleApiError(e); 
-            return []; 
         }
-    };
-
-    // Execute parallel requests based on 'count'
-    const promises = Array.from({ length: count }).map(() => generateSingle());
-    const results = await Promise.all(promises);
+        return resultImages;
+    } 
     
-    return results.flat();
+    // === LÓGICA PARA GEMINI (generateContent) ===
+    else {
+        const config: any = {
+            imageConfig: {
+                aspectRatio: aspectRatio as any,
+            }
+        };
+
+        const parts: any[] = [{ text: fullPrompt }];
+
+        if (referenceImageBase64) {
+            const cleanBase64 = referenceImageBase64.split(',')[1] || referenceImageBase64;
+            parts.push({ text: `Referência visual/estilo (Influência: ${styleInfluence}):` });
+            parts.push({
+                inlineData: {
+                    data: cleanBase64,
+                    mimeType: 'image/png'
+                }
+            });
+        }
+
+        if (poseImageBase64) {
+            const cleanPose = poseImageBase64.split(',')[1] || poseImageBase64;
+            parts.push({ text: `Referência de pose estrutural/ControlNet (Influência: ${poseInfluence}):` });
+            parts.push({
+                inlineData: {
+                    data: cleanPose,
+                    mimeType: 'image/png'
+                }
+            });
+        }
+
+        // Function to execute a single generation request (Gemini needs parallel calls for count > 1 sometimes if API limits per request)
+        // Gemini Flash Image usually returns 1 image per request in preview, so we loop.
+        const generateSingle = async () => {
+            try {
+                const response = await ai.models.generateContent({
+                    model: model,
+                    contents: { parts },
+                    config: config
+                });
+
+                const resultImages: string[] = [];
+                if (response.candidates?.[0]?.content?.parts) {
+                    for (const part of response.candidates[0].content.parts) {
+                        if (part.inlineData && part.inlineData.data) {
+                            resultImages.push(`data:image/png;base64,${part.inlineData.data}`);
+                        }
+                    }
+                }
+                return resultImages;
+            } catch (e) {
+                handleApiError(e); 
+                return []; 
+            }
+        };
+
+        // Execute parallel requests based on 'count'
+        const promises = Array.from({ length: count }).map(() => generateSingle());
+        const results = await Promise.all(promises);
+        
+        return results.flat();
+    }
 
   } catch (error) {
     if (error instanceof Error) throw error;
@@ -280,7 +326,7 @@ export const editImageWithMask = async (
 
      try {
         const response = await ai.models.generateContent({
-            model: MODEL_GEN,
+            model: MODEL_DEFAULT_GEN, // Use default for editing for now
             contents: { parts },
             config: {
                 imageConfig: { aspectRatio: aspectRatio as any }
@@ -351,7 +397,7 @@ export const swapClothing = async (
 
     try {
         const response = await ai.models.generateContent({
-            model: MODEL_GEN,
+            model: MODEL_DEFAULT_GEN,
             contents: { parts },
             config: {
                 imageConfig: { aspectRatio: aspectRatio as any }
