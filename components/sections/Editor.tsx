@@ -163,7 +163,7 @@ export const Editor = () => {
         );
         if(res.length > 0) setResult(res[0]);
     } catch (e: any) {
-        alert(`Falha na edição: ${e.message || 'Verifique a conexão.'}`);
+        alert(e.message || 'Falha na edição. Verifique a conexão.');
     } finally {
         setLoading(false);
     }
