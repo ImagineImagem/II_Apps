@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { NeuCard, NeuButton, NeuInput, NeuTextArea, NeuSelect, NeuSlider, NeuMultiSelect } from '../NeuComponents';
 import { ViewType, MaterialType, GeneratedImage, ImageStyle, LogoStyle, AppSection } from '../../types';
-import { generateImage, checkApiKeyStatus } from '../../services/geminiService';
+import { generateImage, checkApiKeyStatus, testConnection } from '../../services/geminiService';
 import { saveImageToDB, generateUniqueId, downloadImage, getHistory, deleteImageFromDB } from '../../utils/storage';
-import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle, CheckCircle, Info } from 'lucide-react';
+import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle, CheckCircle, Info, Wifi } from 'lucide-react';
 
 interface CreatorProps {
     onNavigate?: (section: AppSection) => void;
@@ -43,6 +43,8 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
   
   // Key Diagnostic State
   const [keyStatus, setKeyStatus] = useState<{status: string, message: string} | null>(null);
+  const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   useEffect(() => {
       // Check Key Status immediately on mount
@@ -116,9 +118,16 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleConnectionTest = async () => {
+      setTestResult({ success: false, message: 'Testando...' });
+      const result = await testConnection();
+      setTestResult(result);
+  };
+
   const handleGenerate = async () => {
     if (!prompt) return;
     setLoading(true);
+    setLastError(null);
     try {
       // Consolidate styles
       const finalStyles = [...selectedStyles];
@@ -168,7 +177,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
       setGeneratedImages(prev => [...newImages, ...prev]);
     } catch (err: any) {
       console.error("Erro na geração:", err);
-      alert(err.message || 'Erro desconhecido. Verifique o diagnóstico da chave no topo da tela.');
+      setLastError(err.message || 'Erro desconhecido.');
     } finally {
       setLoading(false);
     }
@@ -207,20 +216,49 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
         {/* API Key Diagnostics Bar */}
         {keyStatus && (
             <div className={`
-                p-4 mb-6 rounded-xl border-l-4 shadow-neu-out flex items-start gap-3
+                p-4 mb-6 rounded-xl border-l-4 shadow-neu-out flex flex-col md:flex-row items-start md:items-center gap-4 justify-between
                 ${keyStatus.status === 'success' ? 'bg-green-100 border-green-500 text-green-800' : ''}
                 ${keyStatus.status === 'error' ? 'bg-red-100 border-red-500 text-red-800' : ''}
                 ${keyStatus.status === 'warning' ? 'bg-yellow-100 border-yellow-500 text-yellow-800' : ''}
             `}>
-                {keyStatus.status === 'success' ? <CheckCircle size={24}/> : <AlertTriangle size={24}/>}
-                <div>
-                    <h4 className="font-bold text-sm uppercase">Status da Conexão</h4>
-                    <p className="text-sm font-mono mt-1">{keyStatus.message}</p>
-                    {keyStatus.status !== 'success' && (
-                        <p className="text-xs mt-2 opacity-80">
-                           Dica: Se você acabou de adicionar a chave no Vercel, clique em "Redeploy" no painel da Vercel para que ela entre em vigor.
-                        </p>
-                    )}
+                <div className="flex items-center gap-3">
+                    {keyStatus.status === 'success' ? <CheckCircle size={24}/> : <AlertTriangle size={24}/>}
+                    <div>
+                        <h4 className="font-bold text-sm uppercase">Status da Chave API</h4>
+                        <p className="text-sm font-mono mt-1">{keyStatus.message}</p>
+                    </div>
+                </div>
+                
+                <div className="flex gap-2 w-full md:w-auto">
+                    <button 
+                        onClick={handleConnectionTest}
+                        className="px-4 py-2 bg-white/50 hover:bg-white rounded-lg text-sm font-bold flex items-center gap-2 transition-colors border border-black/10"
+                    >
+                        <Wifi size={16}/> Testar Conexão
+                    </button>
+                </div>
+            </div>
+        )}
+        
+        {/* Test Result Feedback */}
+        {testResult && (
+            <div className={`p-3 mb-6 rounded-lg text-sm font-mono border ${testResult.success ? 'bg-blue-100 border-blue-400 text-blue-900' : 'bg-red-100 border-red-400 text-red-900'}`}>
+                <strong>Resultado do Teste:</strong> {testResult.message}
+            </div>
+        )}
+
+        {/* Error Feedback */}
+        {lastError && (
+            <div className="p-4 mb-6 rounded-xl bg-red-100 border border-red-400 text-red-900 shadow-neu-out animate-pulse">
+                <div className="flex items-start gap-3">
+                    <AlertTriangle className="shrink-0 mt-1" />
+                    <div className="overflow-hidden w-full">
+                        <h3 className="font-bold mb-1">Erro na Geração</h3>
+                        <pre className="text-xs whitespace-pre-wrap font-mono bg-white/50 p-2 rounded border border-red-200 overflow-x-auto">
+                            {lastError}
+                        </pre>
+                        <p className="text-xs mt-2 opacity-80">Se o erro for 429 (Cota), aguarde 1 minuto. Se for 403 (Chave), verifique a Vercel.</p>
+                    </div>
                 </div>
             </div>
         )}
@@ -283,12 +321,22 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                         {label: '3:4 (Retrato)', value: '3:4'}
                         ]}
                     />
-                    <NeuSelect 
-                        label="Quantidade"
-                        value={count}
-                        onChange={(e: any) => setCount(Number(e.target.value))}
-                        options={[1,2,3,4].map(n => ({label: n.toString(), value: n}))}
-                    />
+                    <div className="flex flex-col gap-2">
+                         <span className="text-xs font-bold text-neu-dark ml-2">Quantidade (Cuidado: Limite RPM)</span>
+                         <div className="relative">
+                            <select
+                                value={count}
+                                onChange={(e: any) => setCount(Number(e.target.value))}
+                                className="w-full bg-neu-base shadow-neu-out rounded-xl px-4 py-3 outline-none text-neu-text appearance-none cursor-pointer focus:text-neu-accent"
+                            >
+                                <option value={1}>1 (Recomendado)</option>
+                                <option value={2}>2 (Risco 429)</option>
+                                <option value={3}>3 (Alto Risco)</option>
+                                <option value={4}>4 (Perigo 429)</option>
+                            </select>
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neu-dark">▼</div>
+                        </div>
+                    </div>
                 </div>
 
                 <NeuSelect 
