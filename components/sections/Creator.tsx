@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { NeuCard, NeuButton, NeuInput, NeuTextArea, NeuSelect, NeuSlider, NeuMultiSelect } from '../NeuComponents';
 import { ViewType, MaterialType, GeneratedImage, ImageStyle, LogoStyle, AppSection } from '../../types';
-import { generateImage } from '../../services/geminiService';
+import { generateImage, checkApiKeyStatus } from '../../services/geminiService';
 import { saveImageToDB, generateUniqueId, downloadImage, getHistory, deleteImageFromDB } from '../../utils/storage';
-import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle } from 'lucide-react';
+import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 
 interface CreatorProps {
     onNavigate?: (section: AppSection) => void;
@@ -40,10 +40,15 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
+  
+  // Key Diagnostic State
+  const [keyStatus, setKeyStatus] = useState<{status: string, message: string} | null>(null);
 
-  // --- Persistence Logic ---
   useEffect(() => {
-    const loadImages = async () => {
+      // Check Key Status immediately on mount
+      setKeyStatus(checkApiKeyStatus());
+
+      const loadImages = async () => {
         const history = await getHistory();
         setGeneratedImages(history);
     };
@@ -59,7 +64,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
             localStorage.removeItem('transfer_pending');
         } catch (e) {}
     } else {
-        // Load Persisted State if no transfer
+        // Load Persisted State
         const savedState = localStorage.getItem('creator_state_v2');
         if (savedState) {
             try {
@@ -153,7 +158,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
             url,
             prompt: finalPrompt,
             timestamp: Date.now(),
-            width: 1024, // Approximation
+            width: 1024,
             height: 1024
         };
         await saveImageToDB(imgData);
@@ -163,8 +168,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
       setGeneratedImages(prev => [...newImages, ...prev]);
     } catch (err: any) {
       console.error("Erro na geração:", err);
-      // Clean error message display
-      alert(err.message || 'Erro desconhecido. Verifique se sua API Key é válida e tem acesso ao modelo Gemini 2.5.');
+      alert(err.message || 'Erro desconhecido. Verifique o diagnóstico da chave no topo da tela.');
     } finally {
       setLoading(false);
     }
@@ -190,28 +194,34 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
 
   const handleTransfer = (target: 'analyst' | 'editor' | 'swapper') => {
       if (!selectedImage || !onNavigate) return;
-
-      // Save image to localStorage for the target component to pick up
       const key = target === 'analyst' ? 'analyst_transfer' : target === 'editor' ? 'editor_transfer' : 'swapper_transfer';
       localStorage.setItem(key, selectedImage.url);
-      
       setSelectedImage(null);
-
-      // Navigate
       if (target === 'analyst') onNavigate(AppSection.ANALYST);
       else if (target === 'editor') onNavigate(AppSection.EDITOR);
       else if (target === 'swapper') onNavigate(AppSection.SWAPPER);
   };
 
-  // API Key Check
-  const hasKey = !!process.env.API_KEY;
-
   return (
     <>
-        {!hasKey && (
-             <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r shadow-neu-out" role="alert">
-                <p className="font-bold flex items-center gap-2"><AlertTriangle size={20}/> API Key não detectada!</p>
-                <p className="text-sm">Verifique se você adicionou a variável <code>API_KEY</code> nas configurações da Vercel e fez o <strong>Redeploy</strong>.</p>
+        {/* API Key Diagnostics Bar */}
+        {keyStatus && (
+            <div className={`
+                p-4 mb-6 rounded-xl border-l-4 shadow-neu-out flex items-start gap-3
+                ${keyStatus.status === 'success' ? 'bg-green-100 border-green-500 text-green-800' : ''}
+                ${keyStatus.status === 'error' ? 'bg-red-100 border-red-500 text-red-800' : ''}
+                ${keyStatus.status === 'warning' ? 'bg-yellow-100 border-yellow-500 text-yellow-800' : ''}
+            `}>
+                {keyStatus.status === 'success' ? <CheckCircle size={24}/> : <AlertTriangle size={24}/>}
+                <div>
+                    <h4 className="font-bold text-sm uppercase">Status da Conexão</h4>
+                    <p className="text-sm font-mono mt-1">{keyStatus.message}</p>
+                    {keyStatus.status !== 'success' && (
+                        <p className="text-xs mt-2 opacity-80">
+                           Dica: Se você acabou de adicionar a chave no Vercel, clique em "Redeploy" no painel da Vercel para que ela entre em vigor.
+                        </p>
+                    )}
+                </div>
             </div>
         )}
 
@@ -288,7 +298,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                     options={Object.values(ViewType).map(v => ({label: v, value: v}))}
                 />
 
-                {/* Materials Multi-Select (Compact) */}
                 <NeuMultiSelect 
                     label="Materiais / Texturas"
                     options={Object.values(MaterialType)}
@@ -297,7 +306,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                     placeholder="Selecione os materiais..."
                 />
 
-                {/* Style Selection Section (Compact) */}
                 <div className="border-t border-neu-dark/10 pt-4 mt-2 space-y-4">
                     <NeuMultiSelect 
                         label="Estilos Artísticos"
@@ -317,7 +325,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                         </div>
                     )}
 
-                    {/* Logo Sub-selection */}
                     {selectedStyles.includes(ImageStyle.LOGO) && (
                         <div className="pl-4 border-l-2 border-neu-accent/50 space-y-2">
                              <NeuMultiSelect 
@@ -345,7 +352,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
 
             <NeuCard title="Referências">
             <div className="space-y-4">
-                {/* Main Style Reference */}
                 <div className="flex items-center gap-4">
                     <label className="cursor-pointer w-full">
                         <div className="bg-neu-base shadow-neu-in rounded-xl p-4 text-center hover:text-neu-accent transition-colors text-sm">
@@ -368,10 +374,8 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                     onChange={(e: any) => setStyleInfluence(Number(e.target.value))}
                 />
                 
-                {/* Divider */}
                 <div className="h-px bg-neu-dark/20 my-2" />
 
-                {/* Pose Reference */}
                 <div className="flex items-center gap-4">
                     <label className="cursor-pointer w-full">
                         <div className="bg-neu-base shadow-neu-in rounded-xl p-4 text-center hover:text-neu-accent transition-colors text-sm">
@@ -462,7 +466,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                     <div className="p-6 flex flex-col gap-4">
                         <p className="text-xs text-neu-text line-clamp-2 text-center opacity-70">{selectedImage.prompt}</p>
                         
-                        {/* Action Buttons Grid */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <NeuButton onClick={() => downloadImage(selectedImage.url, `${selectedImage.id}.png`)}>
                                 <Download size={18} /> Baixar
@@ -471,7 +474,6 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                                 <RefreshCcw size={18} /> Variação
                             </NeuButton>
                             
-                            {/* Navigation Buttons */}
                             <NeuButton onClick={() => handleTransfer('analyst')} className="text-neu-accent">
                                 <ScanEye size={18} /> Analisar
                             </NeuButton>
