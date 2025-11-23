@@ -162,8 +162,8 @@ export const Editor = () => {
             aspectRatio
         );
         if(res.length > 0) setResult(res[0]);
-    } catch (e) {
-        alert("Falha na edição");
+    } catch (e: any) {
+        alert(`Falha na edição: ${e.message || 'Verifique a conexão.'}`);
     } finally {
         setLoading(false);
     }
