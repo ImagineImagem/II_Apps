@@ -122,8 +122,8 @@ export const Swapper = () => {
 
           const res = await swapClothing(mainImage, activeGarments, ar);
           if(res.length > 0) setResult(res[0]);
-      } catch (e) {
-          alert("Erro na troca de roupa");
+      } catch (e: any) {
+          alert(e.message || 'Erro na troca de roupa. Verifique a conexão.');
       } finally {
           setLoading(false);
       }
