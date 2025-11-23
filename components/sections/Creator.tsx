@@ -162,8 +162,9 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
 
       setGeneratedImages(prev => [...newImages, ...prev]);
     } catch (err: any) {
-      console.error("Erro detalhado:", err);
-      alert(`Erro na geração: ${err.message || 'Verifique a conexão ou a API Key.'}`);
+      console.error("Erro na geração:", err);
+      // Clean error message display
+      alert(err.message || 'Erro desconhecido. Verifique se sua API Key é válida e tem acesso ao modelo Gemini 2.5.');
     } finally {
       setLoading(false);
     }
