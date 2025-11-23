@@ -4,10 +4,28 @@ import { GoogleGenAI } from "@google/genai";
 // The API key must be obtained exclusively from the environment variable process.env.API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Using Flash models which differ from the "Pro" versions in that they
-// generally work with the standard environment key without extra selection steps.
+// Using Flash models which generally provide faster inference.
 const MODEL_GEN = 'gemini-2.5-flash-image'; 
 const MODEL_ANALYZE = 'gemini-2.5-flash';
+
+// Helper to parse API errors
+const handleApiError = (error: any) => {
+    console.error("Gemini API Error:", error);
+    
+    const errorStr = JSON.stringify(error);
+    
+    if (errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error("Cota excedida (Erro 429). O plano gratuito tem limites de requisição. Aguarde um momento ou verifique seu plano no Google AI Studio.");
+    }
+    
+    if (errorStr.includes('API Key not found')) {
+        throw new Error("Chave de API não configurada.");
+    }
+
+    if (error.message) return error;
+    
+    throw new Error("Ocorreu um erro desconhecido na comunicação com a IA.");
+};
 
 export const generateImage = async (
   prompt: string,
@@ -77,21 +95,26 @@ export const generateImage = async (
 
     // Function to execute a single generation request
     const generateSingle = async () => {
-        const response = await ai.models.generateContent({
-            model: MODEL_GEN,
-            contents: { parts },
-            config: config
-        });
+        try {
+            const response = await ai.models.generateContent({
+                model: MODEL_GEN,
+                contents: { parts },
+                config: config
+            });
 
-        const resultImages: string[] = [];
-        if (response.candidates?.[0]?.content?.parts) {
-            for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
-                    resultImages.push(`data:image/png;base64,${part.inlineData.data}`);
+            const resultImages: string[] = [];
+            if (response.candidates?.[0]?.content?.parts) {
+                for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData && part.inlineData.data) {
+                        resultImages.push(`data:image/png;base64,${part.inlineData.data}`);
+                    }
                 }
             }
+            return resultImages;
+        } catch (e) {
+            handleApiError(e);
+            return []; // Unreachable due to throw
         }
-        return resultImages;
     };
 
     // Execute parallel requests based on 'count'
@@ -102,8 +125,8 @@ export const generateImage = async (
     return results.flat();
 
   } catch (error) {
-    console.error("Generation Error:", error);
-    throw error;
+    handleApiError(error);
+    return [];
   }
 };
 
@@ -135,8 +158,8 @@ export const analyzeImage = async (imageBase64: string): Promise<AnalysisResult>
         negative: parts[1] ? parts[1].replace(/\[|\]/g, '').trim() : ""
     };
   } catch (error) {
-    console.error("Analysis Error:", error);
-    throw error;
+    handleApiError(error);
+    return { positive: "Erro na análise", negative: "" };
   }
 };
 
@@ -221,8 +244,8 @@ export const editImageWithMask = async (
         }
         return images;
      } catch (error) {
-         console.error("Edit Error:", error);
-         throw error;
+         handleApiError(error);
+         return [];
      }
 }
 
@@ -304,7 +327,7 @@ export const swapClothing = async (
         }
         return images;
     } catch (error) {
-        console.error("Swap Error:", error);
-        throw error;
+        handleApiError(error);
+        return [];
     }
 };
