@@ -1,17 +1,31 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize API client
-// The API key must be obtained exclusively from the environment variable process.env.API_KEY
-const apiKey = process.env.API_KEY;
+// Helper para obter a chave de forma segura
+const getApiKey = () => {
+    return process.env.API_KEY || "";
+};
 
-// Debug log to check if key is loaded (Masked for security)
-if (!apiKey) {
-    console.warn("⚠️ API Key is missing in process.env.API_KEY");
-} else {
-    console.log(`✅ API Key loaded: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
-}
+// Instância Lazy (só cria quando precisa)
+let aiInstance: GoogleGenAI | null = null;
 
-const ai = new GoogleGenAI({ apiKey: apiKey });
+const getClient = () => {
+    const key = getApiKey();
+    if (!key) throw new Error("API Key não encontrada. Verifique o topo da tela para diagnóstico.");
+    
+    if (!aiInstance) {
+        aiInstance = new GoogleGenAI({ apiKey: key });
+    }
+    return aiInstance;
+};
+
+// Função de Diagnóstico para a UI
+export const checkApiKeyStatus = () => {
+    const key = getApiKey();
+    if (!key) return { status: 'error', message: 'MISSING: A variável API_KEY está vazia ou undefined.' };
+    if (!key.startsWith('AIza')) return { status: 'warning', message: `INVALID FORMAT: A chave lê "${key.substring(0,3)}..." mas deveria começar com "AIza".` };
+    if (key.includes('"') || key.includes(' ')) return { status: 'warning', message: 'INVALID CHARS: A chave contém aspas ou espaços. Remova-os na Vercel.' };
+    return { status: 'success', message: `OK: Chave carregada (${key.substring(0, 6)}...${key.substring(key.length - 4)})` };
+};
 
 // Using Flash models which generally provide faster inference.
 const MODEL_GEN = 'gemini-2.5-flash-image'; 
@@ -23,48 +37,29 @@ const handleApiError = (error: any) => {
     
     let errorMsg = error.message || error.toString();
     
-    // Tenta detectar se a mensagem de erro é um JSON stringificado (comum no SDK quando retorna 429)
     try {
         if (typeof errorMsg === 'string' && (errorMsg.includes('{') || errorMsg.includes('['))) {
-            // Tenta extrair a parte JSON se houver texto antes
             const jsonStart = errorMsg.indexOf('{');
             if (jsonStart !== -1) {
                 const jsonStr = errorMsg.substring(jsonStart);
                 const parsed = JSON.parse(jsonStr);
                 
-                // Verifica estrutura de erro do Google
                 if (parsed.error) {
                     if (parsed.error.code === 429 || parsed.error.status === 'RESOURCE_EXHAUSTED') {
-                        throw new Error("⚠️ LIMITE DE VELOCIDADE (15 RPM). O plano gratuito permite poucas requisições por minuto. Reduza a 'Quantidade' para 1 e aguarde 60 segundos.");
+                        throw new Error("⚠️ LIMITE DE VELOCIDADE (15 RPM). O plano gratuito excedeu o limite. Aguarde 1 minuto.");
                     }
-                    if (parsed.error.message) {
-                        // Se for outro erro, usa a mensagem interna limpa
-                        errorMsg = parsed.error.message;
-                    }
+                    if (parsed.error.message) errorMsg = parsed.error.message;
                 }
             }
         }
-    } catch (e) {
-        // Falha no parse do JSON, continua com a string original
-    }
+    } catch (e) {}
 
-    // Verifica palavras-chave na string final
-    if (
-        errorMsg.includes('429') || 
-        errorMsg.includes('RESOURCE_EXHAUSTED') || 
-        errorMsg.includes('Quota exceeded')
-    ) {
-        throw new Error("⚠️ COTA/VELOCIDADE EXCEDIDA. Aguarde 1 minuto. O plano gratuito tem limite de requisições por minuto (RPM).");
+    if (errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error("⚠️ COTA/VELOCIDADE EXCEDIDA. Aguarde 1 minuto.");
     }
     
-    // Verifica falta de chave ou chave inválida
     if (errorMsg.includes('API Key not found') || errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
-        throw new Error("⚠️ Erro de Autenticação: Chave de API inválida. Verifique se a variável 'API_KEY' está correta no Vercel e faça um REDEPLOY.");
-    }
-
-    // Se ainda parecer um JSON sujo, lança erro genérico
-    if (errorMsg.trim().startsWith('{')) {
-         throw new Error("Erro de comunicação com a IA. Tente simplificar o prompt.");
+        throw new Error("⚠️ Erro de Autenticação: Chave de API inválida ou não carregada.");
     }
 
     throw new Error(errorMsg);
@@ -84,7 +79,9 @@ export const generateImage = async (
   backgroundType: 'neutral' | 'descriptive' = 'neutral',
   backgroundDesc: string = ''
 ): Promise<string[]> => {
-  if (!process.env.API_KEY) throw new Error("API Key não encontrada. Configure a API_KEY no Vercel e faça o Redeploy.");
+  
+  // Instancia o cliente aqui para evitar erro no load da página
+  const ai = getClient();
 
   // Constructing a strict prompt structure
   const bgInstruction = backgroundType === 'neutral' 
@@ -164,7 +161,6 @@ export const generateImage = async (
     const promises = Array.from({ length: count }).map(() => generateSingle());
     const results = await Promise.all(promises);
     
-    // Flatten results into a single array of base64 strings
     return results.flat();
 
   } catch (error) {
@@ -180,7 +176,7 @@ export interface AnalysisResult {
 }
 
 export const analyzeImage = async (imageBase64: string): Promise<AnalysisResult> => {
-  if (!process.env.API_KEY) throw new Error("API Key not found");
+  const ai = getClient();
   const cleanBase64 = imageBase64.split(',')[1] || imageBase64;
 
   try {
@@ -217,8 +213,7 @@ export const editImageWithMask = async (
     materials: string[] = [],
     aspectRatio: string = "1:1"
 ): Promise<string[]> => {
-     if (!process.env.API_KEY) throw new Error("API Key not found");
-     
+     const ai = getClient();
      const cleanOrg = originalImageBase64.split(',')[1] || originalImageBase64;
      
      const styleList = styles.join(', ');
@@ -248,21 +243,16 @@ export const editImageWithMask = async (
            REGRAS RÍGIDAS DE PRESERVAÇÃO:
            1. A área fora da máscara (preta/transparente) deve permanecer 100% IDÊNTICA à imagem original. Não altere pixels fora da máscara.
            2. A área editada deve se integrar perfeitamente ao estilo, iluminação, ruído e textura da imagem original.
-           3. Se a imagem original tem um estilo específico (ex: desenho, foto antiga), a edição deve seguir esse mesmo estilo.
         `;
 
         parts.push({ text: instruction });
         parts.push({ inlineData: { data: cleanOrg, mimeType: 'image/png' } });
         parts.push({ inlineData: { data: cleanMask, mimeType: 'image/png' } });
      } else {
-        // No mask, general edit based on original
         const instruction = `
             Edição da imagem mantendo a estrutura original. 
             Instrução: "${prompt}".
-            
-            CONTEXTO DE ESTILO:
-            ${context}
-
+            CONTEXTO DE ESTILO: ${context}
             Preserve a composição, identidade e estilo visual onde não especificado o contrário.
         `;
         parts.push({ text: instruction });
@@ -304,38 +294,27 @@ export const swapClothing = async (
     garments: GarmentRequest[],
     aspectRatio: string = "3:4"
 ): Promise<string[]> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-
+    const ai = getClient();
     const cleanBase = baseImageBase64.split(',')[1] || baseImageBase64;
     
-    // Improved Prompt Construction logic to handle empty descriptions and reference priority
     const changes = garments.map(g => {
         const hasRef = !!g.refImage;
         let desc = g.description;
-        
-        // Fallback for Vestido or any garment without description but with ref
         if (!desc && hasRef) {
             desc = "a peça de roupa mostrada exatamente na imagem de referência fornecida";
         } else if (!desc) {
             desc = "uma nova versão desta peça com estilo moderno e realista";
         }
-        
         return `ALTERAÇÃO PRIORITÁRIA: Substituir área de ${g.type} por: ${desc}${hasRef ? ' (USAR REFERÊNCIA VISUAL ANEXADA)' : ''}`;
     }).join('. \n');
     
     const prompt = `
     MODO: EDIÇÃO ESTRUTURAL DE MODA (VIRTUAL TRY-ON).
-    
     TAREFA: Aplicar as trocas de roupa listadas abaixo na pessoa da foto principal.
-    
-    LISTA DE ALTERAÇÕES:
-    ${changes}
-    
+    LISTA DE ALTERAÇÕES: ${changes}
     REGRAS DE EXECUÇÃO OBRIGATÓRIAS:
     1. INTEGRIDADE ABSOLUTA: O rosto, cabelo, pose, fundo e iluminação DEVEM permanecer idênticos.
-    2. VESTIDO (Se solicitado): Se a troca for "Vestido" ou "Traje Completo", você DEVE remover visualmente a blusa e a calça/saia atuais e renderizar o vestido cobrindo o corpo inteiro (torso e pernas) conforme a referência.
-    3. FUSÃO PERFEITA: A nova roupa deve ter o mesmo grão, foco, resolução e direção de luz da foto original.
-    4. REFERÊNCIAS: Se houver imagem de referência para a peça, copie o padrão, tecido, decote e comprimento fielmente.
+    2. FUSÃO PERFEITA: A nova roupa deve ter o mesmo grão, foco, resolução e direção de luz da foto original.
     `.trim();
 
     const parts: any[] = [
@@ -343,7 +322,6 @@ export const swapClothing = async (
         { inlineData: { data: cleanBase, mimeType: 'image/png' } }
     ];
 
-    // Add reference images for garments if they exist
     garments.forEach(g => {
         if (g.refImage) {
             const cleanRef = g.refImage.split(',')[1] || g.refImage;
