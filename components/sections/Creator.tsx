@@ -161,8 +161,9 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
       }));
 
       setGeneratedImages(prev => [...newImages, ...prev]);
-    } catch (err) {
-      alert('Erro na geração. Verifique a conexão.');
+    } catch (err: any) {
+      console.error("Erro detalhado:", err);
+      alert(`Erro na geração: ${err.message || 'Verifique a conexão ou a API Key.'}`);
     } finally {
       setLoading(false);
     }
