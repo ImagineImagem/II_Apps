@@ -3,7 +3,7 @@ import { NeuCard, NeuButton, NeuInput, NeuTextArea, NeuSelect, NeuSlider, NeuMul
 import { ViewType, MaterialType, GeneratedImage, ImageStyle, LogoStyle, AppSection } from '../../types';
 import { generateImage } from '../../services/geminiService';
 import { saveImageToDB, generateUniqueId, downloadImage, getHistory, deleteImageFromDB } from '../../utils/storage';
-import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt } from 'lucide-react';
+import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle } from 'lucide-react';
 
 interface CreatorProps {
     onNavigate?: (section: AppSection) => void;
@@ -203,8 +203,18 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
       else if (target === 'swapper') onNavigate(AppSection.SWAPPER);
   };
 
+  // API Key Check
+  const hasKey = !!process.env.API_KEY;
+
   return (
     <>
+        {!hasKey && (
+             <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r shadow-neu-out" role="alert">
+                <p className="font-bold flex items-center gap-2"><AlertTriangle size={20}/> API Key não detectada!</p>
+                <p className="text-sm">Verifique se você adicionou a variável <code>API_KEY</code> nas configurações da Vercel e fez o <strong>Redeploy</strong>.</p>
+            </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Controls */}
         <div className="lg:col-span-1 space-y-6">
