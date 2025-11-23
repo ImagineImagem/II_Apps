@@ -3,18 +3,18 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Fix: Cast process to any to avoid TS error 'Property cwd does not exist on type Process'
-  const env = loadEnv(mode, (process as any).cwd(), '');
+  // Carrega variáveis do .env (local) ou do sistema (Vercel)
+  // O terceiro argumento '' diz para carregar TODAS as variáveis, não só as que começam com VITE_
+  const env = loadEnv(mode, process.cwd(), '');
   
-  // CRITICAL FIX: On Vercel, system env vars might not be in 'env' object returned by loadEnv if they don't start with VITE_
-  // We must check process.env.API_KEY directly as a fallback.
-  const apiKey = process.env.API_KEY || env.API_KEY;
+  // Tenta pegar do .env carregado, ou do process.env do sistema
+  // Se não existir, define como string vazia "" para não quebrar o código com undefined
+  const apiKey = env.API_KEY || process.env.API_KEY || "";
 
   return {
     plugins: [react()],
     define: {
-      // Isso permite que o código continue usando process.env.API_KEY
-      // mesmo rodando no navegador, substituindo pelo valor real durante o build na Vercel
+      // Injeta a variável globalmente no código do cliente
       'process.env.API_KEY': JSON.stringify(apiKey)
     }
   };
