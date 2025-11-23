@@ -2,7 +2,16 @@ import { GoogleGenAI } from "@google/genai";
 
 // Initialize API client
 // The API key must be obtained exclusively from the environment variable process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.API_KEY;
+
+// Debug log to check if key is loaded (Masked for security)
+if (!apiKey) {
+    console.warn("⚠️ API Key is missing in process.env.API_KEY");
+} else {
+    console.log(`✅ API Key loaded: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
+}
+
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 // Using Flash models which generally provide faster inference.
 const MODEL_GEN = 'gemini-2.5-flash-image'; 
@@ -10,21 +19,55 @@ const MODEL_ANALYZE = 'gemini-2.5-flash';
 
 // Helper to parse API errors
 const handleApiError = (error: any) => {
-    console.error("Gemini API Error:", error);
+    console.error("Gemini API Error (Raw):", error);
     
-    const errorStr = JSON.stringify(error);
+    let errorMsg = error.message || error.toString();
     
-    if (errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED')) {
-        throw new Error("Cota excedida (Erro 429). O plano gratuito tem limites de requisição. Aguarde um momento ou verifique seu plano no Google AI Studio.");
-    }
-    
-    if (errorStr.includes('API Key not found')) {
-        throw new Error("Chave de API não configurada.");
+    // Tenta detectar se a mensagem de erro é um JSON stringificado (comum no SDK quando retorna 429)
+    try {
+        if (typeof errorMsg === 'string' && (errorMsg.includes('{') || errorMsg.includes('['))) {
+            // Tenta extrair a parte JSON se houver texto antes
+            const jsonStart = errorMsg.indexOf('{');
+            if (jsonStart !== -1) {
+                const jsonStr = errorMsg.substring(jsonStart);
+                const parsed = JSON.parse(jsonStr);
+                
+                // Verifica estrutura de erro do Google
+                if (parsed.error) {
+                    if (parsed.error.code === 429 || parsed.error.status === 'RESOURCE_EXHAUSTED') {
+                        throw new Error("⚠️ LIMITE DE VELOCIDADE (15 RPM). O plano gratuito permite poucas requisições por minuto. Reduza a 'Quantidade' para 1 e aguarde 60 segundos.");
+                    }
+                    if (parsed.error.message) {
+                        // Se for outro erro, usa a mensagem interna limpa
+                        errorMsg = parsed.error.message;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        // Falha no parse do JSON, continua com a string original
     }
 
-    if (error.message) return error;
+    // Verifica palavras-chave na string final
+    if (
+        errorMsg.includes('429') || 
+        errorMsg.includes('RESOURCE_EXHAUSTED') || 
+        errorMsg.includes('Quota exceeded')
+    ) {
+        throw new Error("⚠️ COTA/VELOCIDADE EXCEDIDA. Aguarde 1 minuto. O plano gratuito tem limite de requisições por minuto (RPM).");
+    }
     
-    throw new Error("Ocorreu um erro desconhecido na comunicação com a IA.");
+    // Verifica falta de chave ou chave inválida
+    if (errorMsg.includes('API Key not found') || errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
+        throw new Error("⚠️ Erro de Autenticação: Chave de API inválida. Verifique se a variável 'API_KEY' está correta no Vercel e faça um REDEPLOY.");
+    }
+
+    // Se ainda parecer um JSON sujo, lança erro genérico
+    if (errorMsg.trim().startsWith('{')) {
+         throw new Error("Erro de comunicação com a IA. Tente simplificar o prompt.");
+    }
+
+    throw new Error(errorMsg);
 };
 
 export const generateImage = async (
@@ -41,7 +84,7 @@ export const generateImage = async (
   backgroundType: 'neutral' | 'descriptive' = 'neutral',
   backgroundDesc: string = ''
 ): Promise<string[]> => {
-  if (!process.env.API_KEY) throw new Error("API Key not found");
+  if (!process.env.API_KEY) throw new Error("API Key não encontrada. Configure a API_KEY no Vercel e faça o Redeploy.");
 
   // Constructing a strict prompt structure
   const bgInstruction = backgroundType === 'neutral' 
@@ -112,8 +155,8 @@ export const generateImage = async (
             }
             return resultImages;
         } catch (e) {
-            handleApiError(e);
-            return []; // Unreachable due to throw
+            handleApiError(e); 
+            return []; 
         }
     };
 
@@ -125,6 +168,7 @@ export const generateImage = async (
     return results.flat();
 
   } catch (error) {
+    if (error instanceof Error) throw error;
     handleApiError(error);
     return [];
   }
