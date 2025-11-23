@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { NeuCard, NeuButton, NeuInput, NeuTextArea, NeuSelect, NeuSlider, NeuMultiSelect } from '../NeuComponents';
 import { ViewType, MaterialType, GeneratedImage, ImageStyle, LogoStyle, AppSection } from '../../types';
-import { generateImage, checkApiKeyStatus, testConnection } from '../../services/geminiService';
+import { generateImage, checkApiKeyStatus, testConnection, AI_MODELS } from '../../services/geminiService';
 import { saveImageToDB, generateUniqueId, downloadImage, getHistory, deleteImageFromDB } from '../../utils/storage';
-import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle, CheckCircle, Info, Wifi } from 'lucide-react';
+import { Loader, Download, Image as ImageIcon, Trash2, X, RefreshCcw, ScanEye, Edit3, Shirt, AlertTriangle, CheckCircle, Info, Wifi, Cpu } from 'lucide-react';
 
 interface CreatorProps {
     onNavigate?: (section: AppSection) => void;
@@ -36,6 +36,8 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
 
   const [aspectRatio, setAspectRatio] = useState('9:16');
   const [count, setCount] = useState(1);
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].value);
+
   const [loading, setLoading] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   
@@ -67,7 +69,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
         } catch (e) {}
     } else {
         // Load Persisted State
-        const savedState = localStorage.getItem('creator_state_v2');
+        const savedState = localStorage.getItem('creator_state_v3');
         if (savedState) {
             try {
                 const parsed = JSON.parse(savedState);
@@ -90,6 +92,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                 setCount(parsed.count || 1);
                 setCustomStyle(parsed.customStyle || '');
                 setCustomLogoStyle(parsed.customLogoStyle || '');
+                setSelectedModel(parsed.selectedModel || AI_MODELS[0].value);
             } catch(e) {}
         }
     }
@@ -101,10 +104,10 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
           prompt, negPrompt, refImage, poseImage, styleInfluence, poseInfluence,
           view, selectedMaterials, selectedStyles, logoStyles,
           bgType, bgDescription,
-          aspectRatio, count, customStyle, customLogoStyle
+          aspectRatio, count, customStyle, customLogoStyle, selectedModel
       };
-      localStorage.setItem('creator_state_v2', JSON.stringify(state));
-  }, [prompt, negPrompt, refImage, poseImage, styleInfluence, poseInfluence, view, selectedMaterials, selectedStyles, logoStyles, bgType, bgDescription, aspectRatio, count, customStyle, customLogoStyle]);
+      localStorage.setItem('creator_state_v3', JSON.stringify(state));
+  }, [prompt, negPrompt, refImage, poseImage, styleInfluence, poseInfluence, view, selectedMaterials, selectedStyles, logoStyles, bgType, bgDescription, aspectRatio, count, customStyle, customLogoStyle, selectedModel]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'ref' | 'pose') => {
     const file = e.target.files?.[0];
@@ -157,7 +160,8 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
           finalStyles,
           selectedMaterials,
           bgType,
-          bgDescription
+          bgDescription,
+          selectedModel
       );
       
       const newImages = await Promise.all(images.map(async (url) => {
@@ -257,7 +261,7 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
                         <pre className="text-xs whitespace-pre-wrap font-mono bg-white/50 p-2 rounded border border-red-200 overflow-x-auto">
                             {lastError}
                         </pre>
-                        <p className="text-xs mt-2 opacity-80">Se o erro for 429 (Cota), aguarde 1 minuto. Se for 403 (Chave), verifique a Vercel.</p>
+                        <p className="text-xs mt-2 font-bold">Dica: Tente trocar o "Modelo de IA" nas configurações abaixo (Use Imagen 3).</p>
                     </div>
                 </div>
             </div>
@@ -268,6 +272,15 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
         <div className="lg:col-span-1 space-y-6">
             <NeuCard title="Configuração">
             <div className="space-y-4">
+                <div className="bg-neu-base shadow-neu-in rounded-xl p-1">
+                    <NeuSelect 
+                        label="Modelo de IA (Mude se der erro)"
+                        value={selectedModel}
+                        onChange={(e: any) => setSelectedModel(e.target.value)}
+                        options={AI_MODELS}
+                    />
+                </div>
+
                 <NeuTextArea 
                 placeholder="Prompt Positivo (Descreva sua imaginação...)" 
                 value={prompt} 
@@ -400,6 +413,11 @@ export const Creator: React.FC<CreatorProps> = ({ onNavigate }) => {
 
             <NeuCard title="Referências">
             <div className="space-y-4">
+                {selectedModel.includes('imagen') && (
+                    <div className="p-2 bg-yellow-100 text-yellow-800 text-xs rounded border border-yellow-300 flex items-center gap-2">
+                        <Info size={16}/> Modelo Imagen suporta apenas Texto para Imagem. Referências serão ignoradas.
+                    </div>
+                )}
                 <div className="flex items-center gap-4">
                     <label className="cursor-pointer w-full">
                         <div className="bg-neu-base shadow-neu-in rounded-xl p-4 text-center hover:text-neu-accent transition-colors text-sm">
