@@ -27,6 +27,20 @@ export const checkApiKeyStatus = () => {
     return { status: 'success', message: `OK: Chave carregada (${key.substring(0, 6)}...${key.substring(key.length - 4)})` };
 };
 
+// Teste simples de conexão (Texto)
+export const testConnection = async () => {
+    try {
+        const ai = getClient();
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: 'Responda apenas com a palavra "Conectado".' }] }
+        });
+        return { success: true, message: `SUCESSO: ${response.text}` };
+    } catch (e: any) {
+        return { success: false, message: `FALHA: ${e.message || e.toString()}` };
+    }
+};
+
 // Using Flash models which generally provide faster inference.
 const MODEL_GEN = 'gemini-2.5-flash-image'; 
 const MODEL_ANALYZE = 'gemini-2.5-flash';
@@ -36,7 +50,8 @@ const handleApiError = (error: any) => {
     console.error("Gemini API Error (Raw):", error);
     
     let errorMsg = error.message || error.toString();
-    
+    let errorCode: string | number = "UNKNOWN";
+
     try {
         if (typeof errorMsg === 'string' && (errorMsg.includes('{') || errorMsg.includes('['))) {
             const jsonStart = errorMsg.indexOf('{');
@@ -45,24 +60,28 @@ const handleApiError = (error: any) => {
                 const parsed = JSON.parse(jsonStr);
                 
                 if (parsed.error) {
-                    if (parsed.error.code === 429 || parsed.error.status === 'RESOURCE_EXHAUSTED') {
-                        throw new Error("⚠️ LIMITE DE VELOCIDADE (15 RPM). O plano gratuito excedeu o limite. Aguarde 1 minuto.");
-                    }
-                    if (parsed.error.message) errorMsg = parsed.error.message;
+                    errorCode = parsed.error.code || parsed.error.status;
+                    errorMsg = parsed.error.message || JSON.stringify(parsed.error);
                 }
             }
         }
     } catch (e) {}
 
-    if (errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-        throw new Error("⚠️ COTA/VELOCIDADE EXCEDIDA. Aguarde 1 minuto.");
+    // Mensagens de erro com detalhes técnicos para o usuário debugar
+    if (errorCode === 429 || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error(`⚠️ COTA EXCEDIDA (429). O Google bloqueou temporariamente esta chave. \nDetalhes técnicos: ${errorMsg}`);
     }
     
     if (errorMsg.includes('API Key not found') || errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
-        throw new Error("⚠️ Erro de Autenticação: Chave de API inválida ou não carregada.");
+        throw new Error(`⚠️ ERRO DE CHAVE (403). Chave inválida ou permissão negada. \nDetalhes: ${errorMsg}`);
     }
 
-    throw new Error(errorMsg);
+    if (errorMsg.includes('503') || errorMsg.includes('Overloaded')) {
+         throw new Error(`⚠️ SERVIDOR SOBRECARREGADO (503). O modelo está ocupado. Tente novamente em instantes. \nDetalhes: ${errorMsg}`);
+    }
+
+    // Erro genérico com o texto original
+    throw new Error(`⚠️ ERRO DA API: ${errorMsg}`);
 };
 
 export const generateImage = async (
